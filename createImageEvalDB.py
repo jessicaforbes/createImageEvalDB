@@ -31,23 +31,11 @@ class ParseXMLFilesAndFillDB():
         self.dbFileName = 'ImageEvals.db'
         
     def main(self):
-        start_time = datetime.datetime.now()
-        
-        #expList = self.getExperimentsList()
-        #self.createDataBase()        
-        #self.fillDBFromXMLs(expList)
-        #self.printDBtoCSVfile()
-        
-        PerSitePlotObject = MakeBoxPlotPerSite(self.dbFileName)
-        PerSitePlotObject.main()
-        PerSitePlotObject = None
-        #
-        #PlotObject = MakeBoxPlotForAllEvals(self.dbFileName)
-        #PlotObject.main()        
-        
-        print "-"*50
-        print "The program took "
-        print datetime.datetime.now() - start_time
+        expList = self.getExperimentsList()
+        self.createDataBase()        
+        self.fillDBFromXMLs(expList)
+        self.printDBtoCSVfile()
+        self.printInfoToCSVfile()
         
     def getExperimentsList(self):
         """
@@ -69,32 +57,28 @@ class ParseXMLFilesAndFillDB():
         RESTurl = "https://www.predict-hd.net/xnat/REST/experiments?xsiType="
         RESTurl += "phd:imageReviewData&format=csv&columns=project,phd:image"
         RESTurl += "ReviewData/label,xnat:subjectData/ID"
-        Output = "experiments_tmp.csv"            # name the temporary csv file to hold info from XNAT
-        urllib.urlretrieve(RESTurl, Output)       # retrieve info from XNAT and saves it in the temporary csv file
-        Handle = open(Output)                     # open the tmp csv file
-        ExpString = Handle.read()                 # read the csv file and saves to a string
-        Handle.close()                            # close the connection to the csv file
-        os.remove(Output)                         # remove tmp csv file
-        expList = ExpString.strip().replace("\"","").split('\n')  # remove quotation marks and split the string into a new list item at each '\n'
-        # header line not needed in the returned list
-        return expList[1:]
+        Output = "experiments_tmp.csv"
+        urllib.urlretrieve(RESTurl, Output)
+        Handle = open(Output)
+        ExpString = Handle.read()
+        Handle.close()
+        os.remove(Output)
+        expList = ExpString.strip().replace("\"","").split('\n')
+        return expList[1:] ## header line not needed in the returned list
           
     def createDataBase(self):
         """
         Create the ImageEval SQLite database that will contain all of
         the information parsed from the Image Eval XML files.            
         """   
-        # column titles and types for the ImageEval SQLite database
-        dbColTypes =  "project TEXT, subject TEXT, session TEXT, seriesnumber "
-        dbColTypes += "TEXT, scantype TEXT, overallqaassessment TEXT, "
-        dbColTypes += "normalvariants TEXT, lesions TEXT, snr TEXT, cnr TEXT, "
-        dbColTypes += "fullbraincoverage TEXT, misalignment TEXT, "
-        dbColTypes += "swapwraparound TEXT, ghostingmotion TEXT, inhomogeneity"
-        dbColTypes += " TEXT, susceptibilitymetal TEXT, flowartifact TEXT, "
-        dbColTypes += "truncationartifact TEXT, evaluator TEXT, imagefile "
-        dbColTypes += "TEXT, freeformnotes TEXT, evaluationcompleted TEXT, "
-        dbColTypes += "date TEXT, time TEXT, xnatSubjectID TEXT, "
-        dbColTypes += "xnatImageReviewLabel TEXT, xnatImageReviewID TEXT, "
+        ## column titles and types for the ImageEval SQLite database
+        dbColTypes =  "project TEXT, subject INTEGER, session INTEGER, seriesnumber INTEGER, scantype TEXT, "
+        dbColTypes += "overallqaassessment INTEGER, normalvariants TEXT, lesions TEXT, snr TEXT, cnr "
+        dbColTypes += "TEXT, fullbraincoverage TEXT, misalignment TEXT, swapwraparound TEXT, "
+        dbColTypes += "ghostingmotion TEXT, inhomogeneity TEXT, susceptibilitymetal TEXT, "
+        dbColTypes += "flowartifact TEXT, truncationartifact TEXT, evaluator TEXT, imagefile "
+        dbColTypes += "TEXT, freeformnotes TEXT, evaluationcompleted TEXT, date TEXT, time TEXT, "
+        dbColTypes += "xnatSubjectID TEXT, xnatImageReviewLabel TEXT, xnatImageReviewID TEXT, "
         dbColTypes += "xnatSessionID TEXT"
     
         if os.path.exists(self.dbFileName):
@@ -108,17 +92,16 @@ class ParseXMLFilesAndFillDB():
             dbCur.close()
             
     def fillDBFromXMLs(self, expList):
-        con = lite.connect(self.dbFileName) # connect to the ImageEval database
-        dbCur = con.cursor()                # make a cursor connection
+        con = lite.connect(self.dbFileName)
+        dbCur = con.cursor()
         
         for line in expList:
-            (xnatSubjectID, URI) = self.getScanInfo(line)
+            (xnatSubjectID, URI) = self._getScanInfo(line)
             xmlString = self.getXMLstring(URI)            
             myResult=ParseToFields(xmlString)
             xmlString = None
             # find the scan type from the image file name
-            (subject, scanType) = self.findSessionAndScanType(
-                myResult._fieldDict['imagefile'])
+            (subject, scanType) = self._findSessionAndScanType(myResult._fieldDict['imagefile'])
             myResult._fieldDict['subject'] = subject
             myResult._fieldDict['scantype'] = scanType
             myResult._fieldDict['xnatSubjectID']= xnatSubjectID    
@@ -130,7 +113,7 @@ class ParseXMLFilesAndFillDB():
             myResult._fieldDict['session'] = myResult._session_LABEL
             myResult._fieldDict['seriesnumber'] = myResult._series_number
     
-            SQLiteCommand = self.getSQLiteCommand(myResult._fieldDict)
+            SQLiteCommand = self._getSQLiteCommand(myResult._fieldDict)
             myResult = None
             dbCur.execute(SQLiteCommand)
             SQLiteCommand = None
@@ -138,63 +121,61 @@ class ParseXMLFilesAndFillDB():
                   
         dbCur.close()
                     
-    def getScanInfo(self, line):
+    def _getScanInfo(self, line):
         """ Returns the XNAT Subject ID and the URI for an Image Eval. """
-        ScanInfo = line.strip().split(',')
-        xnatSubjectID = ScanInfo[2] # assign the xnatSubjectID: "xnat:subjectdata/id"
-        URI = ScanInfo[4]           # assign the URI for the image eval
-        return xnatSubjectID, URI
+        scan_info = line.strip().split(',')
+        xnat_subject_ID = scan_info[2]
+        URI = scan_info[4]
+        return xnat_subject_ID, URI
                 
     def getXMLstring(self, URI):
         """
         Copy the Image Eval XML information from XNAT.
         Store it in the string "xmlString"
         """
-        Path = "https://www.predict-hd.net/xnat{0}?format=xml".format(URI)   # the URL to the XML info on XNAT
-        Handle = urllib.urlopen(Path)         # open the URL path that contains the XML info
-        xmlString = Handle.read()             # save the XML info to a string called xmlString
-        Handle.close()                        # close the URL object
-        #print "Parsing Image Eval XML file from {0}".format(Path)
-        return xmlString
+        path = "https://www.predict-hd.net/xnat{0}?format=xml".format(URI)
+        Handle = urllib.urlopen(path)
+        xml_string = Handle.read()
+        Handle.close()
+        #print "Parsing Image Eval XML file from {0}".format(path)
+        return xml_string
                 
-    def findSessionAndScanType(self, imageDir):
+    def _findSessionAndScanType(self, imageDir):
         """
         Find the subject and scan type from the image file name
         listed in the Image Eval XML string.
         """
-        imageDirSplit = imageDir.strip().split('/') 
-        imageFile = imageDirSplit[-1]                               # grab the image file name
-        imageFilePat = re.compile('([^_]*)_[^_]*_([^_]*)_[^-]*')    # set the pattern for the image file name
-        # match the pattern to the characters in the image file name in order to get the subject and scan type from the file name
-        imageFileGroup = imageFilePat.match(imageFile)             
-        if imageFileGroup is not None and len(imageFileGroup.groups()) == 2:
-            subject = imageFileGroup.group(1)                       # set the subject num to the first group found in the match
-            scanType = imageFileGroup.group(2)                      # set the scanType to the second group found in the match
-            return subject, scanType
+        _image_dir_split = imageDir.strip().split('/') 
+        _image_file = _image_dir_split[-1]
+        _image_file_pattern = re.compile('([^_]*)_[^_]*_([^_]*)_[^-]*')
+        _image_file_group = _image_file_pattern.match(_image_file)             
+        if _image_file_group is not None and len(_image_file_group.groups()) == 2:
+            _subject = _image_file_group.group(1)
+            _scanType = _image_file_group.group(2)
+            return _subject, _scanType
         else:
-            print("ERROR: Invalid number of groups. {0}".format(imageFile))
+            print("ERROR: Invalid number of groups. {0}".format(_image_file))
             return "NOT_FOUND", "NOT_FOUND"
              
-    def getSQLiteCommand(self, EvalDict):
+    def _getSQLiteCommand(self, EvalDict):
         """
         Cycle through the parsed information gathered for each Image Evaluation
         XML file. Create the SQLite command to add info to a new ImageEval
         database row.        
         """
-        ColNames = EvalDict.keys()
-        colNamesString = ""
-        row =  ""
-        for col in ColNames:
-            colNamesString += col + ", "                     # add the column name and a comma to the colNamesString
-            evalInfo = EvalDict[col]                         # get the evaluation info for this subject and session number
-            evalInfo = evalInfo.replace("'", "''")           # replace single apostrophes with double apostrophes for use in SQLite
-            row += "'" + evalInfo + "', "                    # add the eval info to the row string
-        trimmedColNameString = colNamesString[:-2]           # trim the excess comma and space from the end of the string
-        trimmedRow = row[:-2]                                # trim the excess comma and space from the end of the string
-        # create an SQLite command that adds the data from each Image Eval file to the ImageEval database row by row 
-        SQLiteCommand = "INSERT INTO ImageEval ({0}) VALUES ({1});".format(
-            trimmedColNameString, trimmedRow)
-        return  SQLiteCommand
+        _col_names = EvalDict.keys()
+        _col_names_str = ""
+        _row =  ""
+        for _col in _col_names:
+            _col_names_str += "{0}, ".format(_col)
+            _eval_info = EvalDict[_col]
+            _eval_info = _eval_info.replace("'", "''")
+            _row += "'{0}', ".format(_eval_info)
+        _col_names_str = _col_names_str[:-2] ## trim the excess comma and space from the end of the string
+        _row = _row[:-2]                     ## trim the excess comma and space from the end of the string
+        # create an SQLite command that adds data from each Image Eval file to the ImageEval database row by row 
+        _SQLite_command = "INSERT INTO ImageEval ({0}) VALUES ({1});".format(_col_names_str, _row)
+        return  _SQLite_command
  
     def printDBtoCSVfile(self):
         """
@@ -203,8 +184,7 @@ class ParseXMLFilesAndFillDB():
         """
         con = lite.connect(self.dbFileName)
         dbCur = con.cursor()
-        SQLiteCommand = "SELECT * FROM ImageEval ORDER BY project, subject, "
-        SQLiteCommand += "session, seriesnumber, scantype;"
+        SQLiteCommand = "SELECT * FROM ImageEval ORDER BY project, subject, session, seriesnumber, scantype;"
         dbCur.execute(SQLiteCommand)
         DBinfo = dbCur.fetchall()
         col_name_list = [tuple[0] for tuple in dbCur.description]
@@ -214,21 +194,53 @@ class ParseXMLFilesAndFillDB():
         Handle.writerow(col_name_list)
         for row in DBinfo:
             Handle.writerow(row)                
- 
-class AllEvals():
-    def __init__(self, Site):
-        self.Site = Site
-        # dictionary of evaluation scores:
-        # key = image scan type, value = evaluation score
-        self.Evals = dict()
-
-    def addEvals(self, scanType, evalList):
-        self.Evals[scanType] = evalList
-           
+         
+    def printInfoToCSVfile(self):
+        """
+        
+        """                
+        Handle = csv.writer(open('proj_subj_session_imagefiles.csv', 'wb'),
+                            quoting=csv.QUOTE_ALL)
+        col_name_list = ["project", "subject", "session", "imagefiles"]
+        Handle.writerow(col_name_list)
+        tmp_session = None
+        line = None
+        imagefile_info = self.getImageFileInfoFromDB()
+        for row in imagefile_info:
+            project = str(row[0])
+            subject = str(row[1])
+            session = str(row[2])
+            scan_type = str(row[4])
+            imagefile = str(row[5])
+            if tmp_session != session:
+                eval_dict = dict()
+                eval_dict[scan_type] = [imagefile]
+                if line is not None:
+                    Handle.writerow(line) 
+            else:
+                if scan_type in eval_dict.keys():
+                    eval_dict[scan_type].append(imagefile)
+                else:
+                    eval_dict[scan_type] = [imagefile]
+            tmp_session = session
+            sorted_eval_dict = sort(eval_dict)
+            line = (project, subject, session, sorted_eval_dict)
+         
+    def getImageFileInfoFromDB(self):
+        con = lite.connect(self.dbFileName)
+        dbCur = con.cursor()
+        SQLiteCommand = "SELECT project, subject, session, overallqaassessment, scantype, imagefile "
+        SQLiteCommand += "FROM ImageEval WHERE overallqaassessment > 5 "
+        SQLiteCommand += "ORDER BY project, subject, session, scantype, overallqaassessment DESC;"
+        dbCur.execute(SQLiteCommand)
+        DBinfo = dbCur.fetchall()
+        dbCur.close()
+        return DBinfo
+         
 class ParseToFields():
     def __init__(self,xmlString):
-        self._project       = ""  # The project for this XML
-        # main label for this subject, in the form of "{sessionID}_{scanid}_IR
+        self._project       = ""  # The project for this XML main label for this subject,
+                                  # in the form of "{sessionID}_{scanid}_IR
         self._label         = ""
         self._imageReviewID = ""
         self._session       = ""
@@ -271,22 +283,17 @@ class ParseToFields():
         self._project=myelem.attrib['project']
         self._label  =myelem.attrib['label']
         self._imageReviewID = myelem.attrib['ID']
-        # the first 5 digits are always the session label
-        self._session_LABEL=self._label[0:5]
+        self._session_LABEL=self._label[0:5] ## the first 5 digits are always the session label
         for child in myelem.getiterator():
             if child.tag == '{http://nrg.wustl.edu/phd}field':
                 myatts=dict(child.items())
                 self._sql_col_names.append(self.makeSQLColName(myatts['name']))
                 if 'value' in myatts.keys(): 
-                    self._fieldDict[self.makeSQLColName(
-                        myatts['name'])] = myatts['value']
-                # Some XML files have no value for "free form notes".
-                # This assigns an empty string.
+                    self._fieldDict[self.makeSQLColName(myatts['name'])] = myatts['value']
+                ## Assign an empty string if there is no value for "free form notes".
                 elif 'value' not in myatts.keys() and myatts['name'] == "Free Form Notes":
                     self._fieldDict[self.makeSQLColName(myatts['name'])] = " "
-                    Err = "ERROR: No value for \"Free Form Notes\" field in"
-                    Err += " the XML file for {0}".format(self._imageReviewID)
-                    print Err
+                    print "ERROR: No value for \"Free Form Notes\" field in ImageEval for {0}".format(self._imageReviewID)
                 pass
             elif child.tag  == '{http://nrg.wustl.edu/xnat}date':
                 self._date = child.text
@@ -302,195 +309,133 @@ class ParseToFields():
                 pass
             
     def makeSQLColName(self, val):
-        val=val.replace(' ','').replace('/','').lower()
+        val = val.replace(' ','').replace('/','').lower()
         return val
 
-class MakeBoxPlotPerSite():
+class MakeBoxplots():
     
-    def __init__(self, dbFileName):
-        self.dbFileName = dbFileName
-        self.AllEvalDict = dict()
+    def __init__(self):
+        self.dbFileName = 'ImageEvals.db'
         
     def main(self):
-        self.makeEvalDict()
-        self.makePerSiteWhiskerPlots()   
-    
-    def makeEvalDict(self):
-        """
-        Open a connection to the database containing information parsed from
-        Image Eval XML files. Make a dictionary called 'evalDict' where the KEY
-        is the distinct scan types found in the database and the VALUES are a
-        list of the evaluation scores for that scan type. This dictionary is
-        used to create a box-and-whisker plot.
-        """    
-        con = lite.connect(self.dbFileName)  # open a connection to the ImageEval database
-        dbCur = con.cursor()                 # open a cursor to execute SQLite commands
-        # use the cursor to pull the distinct scan types from the ImageEval database
-        dbCur.execute("SELECT DISTINCT project FROM ImageEval;")
-        # fetches all of the output from the previous execute command and stores each row as an item in a list
-        siteList = dbCur.fetchall()
-            
-        # cycles through the list of scan types to create a dictionary where the Key is the scan type and
-        # the Value is the list of evaluation scores for that scan type.
-        for site in siteList[34:36]:
-            site = site[0]
-            NewSiteObject = AllEvals(site)
-            self.AllEvalDict[site] = NewSiteObject
-            dbCur.execute("SELECT DISTINCT scantype FROM ImageEval WHERE project = '{0}';".format(site))
-            # fetches all of the output from the previous execute command and stores each row as an item in a list
-            scanTypeList = dbCur.fetchall()
-            for row in scanTypeList:
-                scanType = row[0]         # the scan type from the database is stored in a tuple EX: (u'PD-15', )
-                # executes an SQLite command that retrieves all the assessment scores for this scan type
-                dbCur.execute("SELECT overallqaassessment FROM ImageEval WHERE project = '{0}' AND scantype = '{1}';".format(site, scanType))
-                # fetches all of the output from the previous execute command and stores the scores in the evals var
-                evals = dbCur.fetchall()
-                # MakeEvalList changes the evals from unicode and tuple form i.e. [(u'7',), (u'6',), (u'1',)]
-                # to a list of integers necessary for calculations and making a box plot i.e. [7, 6, 1]
-                evalList = self.makeEvalList(evals)   
-                self.AllEvalDict[site].addEvals(scanType, evalList)    
-        dbCur.close()    # closes the cursor
+        self.makeAllSiteBoxPlotNEW()
+        self.makePerSiteBoxPlotNEW()
 
-    def makeEvalList(self, evals):
+    def getEvalScores(self, SQLite_query):
         """
         MakeEvalList changes the evals from unicode and tuple form i.e. [(u'7',), (u'6',), (u'1',)]  
         to a list of integers necessary for calculations and making a box plot i.e. [7, 6, 1]
         """
-        evalList = list()
-        for x in evals:
-            newEval = float(x[0])
-            evalList.append(newEval)
-        return evalList    
- 
-    def makePerSiteWhiskerPlots(self):
+        query_results = self._querySQLiteDB(SQLite_query)
+        eval_list = list()
+        for row in query_results:
+            new_eval = float(row[0])
+            eval_list.append(new_eval)
+        return eval_list      
+        
+    def _findEvalsGreaterThan5(self, evalScores):
+        count = 0
+        for val in evalScores:
+            if val > 5:
+                count += 1
+        return count
+    
+    def _querySQLiteDB(self, SQLite_query):
+        con = lite.connect(self.dbFileName)
+        dbCur = con.cursor()
+        dbCur.execute(SQLite_query)
+        query_results = dbCur.fetchall()
+        dbCur.close()
+        return query_results
+    
+    def getListFromDB(self, SQLite_query):
+        query_results = self._querySQLiteDB(SQLite_query)
+        List = list()
+        # the scan type from the database is stored in a tuple EX: (u'PD-15', )
+        for row in query_results:
+            list_item = row[0]
+            List.append(list_item)
+        return List
+
+    def getEvalScoresAndXticks(self, site = None):
+        scanTypeList = [u'T1-30', u'T2-30', u'T1-15', u'PDT2-15', u'T2-15', u'PD-15']
+        all_evals = list()
+        x_labels = list()        
+        query_1 = self.getQuery1(site)
+        DB_scan_types = self.getListFromDB(query_1)    
+        
+        for scan_type in scanTypeList:
+            if scan_type in DB_scan_types:
+                query_2 = self.getQuery2(site, scan_type)
+                eval_scores = self.getEvalScores(query_2)   
+                all_evals.append(eval_scores)
+                count = self._findEvalsGreaterThan5(eval_scores)
+                x_labels.append(scan_type + "\n (" + str(count) + "/" + str(len(eval_scores)) + ")")
+            else:
+                all_evals.append(list())
+                x_labels.append(scan_type + "\n (0)")
+        return all_evals, x_labels, scanTypeList
+    
+    def makePerSiteBoxPlotNEW(self):
         """
         This function makes a box-and-whisker plot showing the evaluation
         scores grouped by the image scan type.  
         """
-        pp = pdfpages('test.pdf')
-        #pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
-        siteList = self.AllEvalDict.keys()                     # makes a list of all site locations
-        siteList = sort(siteList)                              # sorts the list of site locaitons
-        scanTypeList = [u'T1-30', u'T2-30', u'T1-15', u'PDT2-15', u'T2-15', u'PD-15']
-        for site in siteList:
-            SiteObject = self.AllEvalDict[site]                # sets the site object to a variable for easier identification later
-            allEvals = list()                                  # makes an empty list which will contain all eval scores
-            xLabels = list()                                   # makes an empty list for x labels 
-            for scanType in scanTypeList:
-                if scanType in SiteObject.Evals.keys():
-                    evalScores = SiteObject.Evals[scanType]
-                    allEvals.append(evalScores)             # appends the eval scores for this scan type to allEvals
-                    # appends the scan type and the number of scans for this type to the xLabel list
-                    Count = self.findEvalsGreaterThan5(evalScores)
-                    xLabels.append(scanType + "\n (" + str(Count) + "/" + str(len(evalScores)) + ")")
-                else:
-                    emptyList = list()
-                    allEvals.append(emptyList)             # appends the eval scores for this scan type to allEvals
-                    # appends the scan type and the number of scans for this type to the xLabel list
-                    xLabels.append(scanType + "\n (0)")
-            boxplot(allEvals)
-            ylim(-0.1, 10.1)                      # sets the y scale limits between -0.1 and 10.1 since scores are only between 0 and 10
-            xticks( arange(1,len(scanTypeList)+1), xLabels, fontsize = 'medium')  # assigns the x labels and fontsize
-            yticks(fontsize = 'large')            # assigns y ticks fontsize to large
+        #pp = pdfpages('test.pdf')
+        pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
+        site_list = self.getListFromDB("SELECT DISTINCT project FROM ImageEval;")
+        for site in site_list:
+            (all_evals, x_labels, scanTypeList) = self.getEvalScoresAndXticks(site)
+            boxplot(all_evals)
+            ylim(-0.1, 10.1)
+            xticks( arange(1, len(scanTypeList)+1), x_labels, fontsize = 'medium')
+            yticks(fontsize = 'large')
             xlabel("\n \n Image Scan Type (Ratio of Scores Greater Than 5 to Total Scores)", fontsize = 'large')
             ylabel("Evalution Scores \n", fontsize = 'large')
             title('Evaluation Scores for Site {0} Grouped by Image Scan Type \n \n'.format(site), fontsize = 'large')
-            #subplots_adjust(bottom = 0.2, top = 0.88, right = 0.8, left = 0.2)
             subplots_adjust(bottom = 0.2, top = 0.86, right = .88, left = 0.15)
-            subplots_adjust()
             pp.savefig()
-            hold(False)         
+            hold(False)
         pp.close()
         
-    def findEvalsGreaterThan5(self, evalScores):
-        Count = 0
-        for val in evalScores:
-            if val > 5:
-                Count += 1
-        return Count
- 
-class MakeBoxPlotForAllEvals():
-
-    def __init__(self, dbFileName):
-        self.dbFileName = dbFileName
-        self.evalDict = dict()       # makes an empty dictionary called evalDict
-        
-    def main(self):
-        self.makeEvalDict()
-        self.makeWhiskerPlot()
-     
-    def makeEvalDict(self):
-        """
-        Opens a connection to the database containing information parsed from Image Eval XML files.
-        Makes a dictionary called 'evalDict' where the KEY is the distinct scan types found in
-        the database and the VALUES are a list of the evaluation scores for that scan type.    
-        This dictionary is used to create a box-and-whisker plot.        
-        """
-        con = lite.connect(self.dbFileName)       # opens a connection to the ImageEval database
-        dbCur = con.cursor()                      # opens a cursor to execute SQLite commands
-        # uses the cursor to pull the distinct scan types from the ImageEval database
-        dbCur.execute("SELECT DISTINCT scantype FROM ImageEval;")
-        # fetches all of the output from the previous execute command and stores each row as an item in a list
-        scanTypeList = dbCur.fetchall()
-        
-        # cycles through the list of scan types to create a dictionary where the Key is the scan type and
-        # the Value is the list of evaluation scores for that scan type.
-        for row in scanTypeList:
-            scanType = row[0]                   # the scan type from the database is stored in a tuple EX: (u'PD-15', )
-            # executes an SQLite command that retrieves all the assessment scores for this scan type
-            dbCur.execute("SELECT overallqaassessment FROM ImageEval WHERE scantype = '{0}';".format(scanType))
-            # fetches all of the output from the previous execute command and stores the scores in the evals var
-            evals = dbCur.fetchall()
-            # MakeEvalList changes the evals from unicode and tuple form i.e. [(u'7',), (u'6',), (u'1',)]
-            # to a list of integers necessary for calculations and making a box plot i.e. [7, 6, 1]
-            evalList = self.makeEvalList(evals)   
-            Key = scanType                      # sets the Key to scanType
-            self.evalDict[Key] = evalList       # adds the evaluation score list as a Value to the evalDict dictionary
-        
-        dbCur.close()    # closes the cursor
-       
-    def makeEvalList(self, evals):
-        """
-        MakeEvalList changes the evals from unicode and tuple form i.e. [(u'7',), (u'6',), (u'1',)]  
-        to a list of integers necessary for calculations and making a box plot i.e. [7, 6, 1]
-        """
-        evalList = list()
-        for x in evals:
-            newEval = int(x[0])
-            evalList.append(newEval)
-        return evalList
-    
-    def findEvalsGreaterThan5(self, evalScores):
-        Count = 0
-        for val in evalScores:
-            if val > 5:
-                Count += 1
-        return Count
-    
-    def makeWhiskerPlot(self):
+    def makeAllSiteBoxPlotNEW(self):
         """
         This function makes a box-and-whisker plot showing the evaluation
         scores grouped by the image scan type.          
-        """    
-        allEvals = list()                     # makes an empty list called Evals
-        scanTypeList = [u'T1-30', u'T2-30', u'T1-15', u'PDT2-15', u'T2-15', u'PD-15']
-        xLabels = list()                      # makes an empty list for x labels 
-        for scanType in scanTypeList:
-            evalScores = self.evalDict[scanType]
-            allEvals.append(evalScores)       # appends the eval scores for this scan type to allEvals
-            # appends the scan type and the number of scans for this type to the xLabel list
-            Count = self.findEvalsGreaterThan5(evalScores)
-            xLabels.append(scanType + "\n (" + str(Count) + "/" + str(len(evalScores)) + ")")
-        boxplot(allEvals)                     # makes a box-and-whisker plot of scores grouped by scan type
-        ylim( -0.1, 10.1)                     # sets the y scale limits between -0.1 and 10.1 since scores are only between 0 and 10
-        xticks( arange(1,len(scanTypeList)+1), xLabels, fontsize = 'small')  # assigns the x labels and fontsize
-        yticks(fontsize = 'large')            # assigns y ticks fontsize to large
+        """
+        (all_evals, x_labels, scanTypeList) = self.getEvalScoresAndXticks()
+        boxplot(all_evals)
+        ylim(-0.1, 10.1)
+        xticks( arange(1, len(scanTypeList)+1), x_labels, fontsize = 'small')
+        yticks(fontsize = 'large')
         xlabel("\n \n Image Scan Type (Ratio of Scores Greater Than 5 to Total Scores)", fontsize = 'large')
         ylabel("Evalution Scores \n", fontsize = 'large')
         title('Evaluation Scores Grouped by Image Scan Type \n \n', fontsize = 'x-large')
         subplots_adjust(bottom = 0.2, top = 0.86, right = .88, left = 0.15)
+        #savefig("test_perscantype.pdf")
         savefig("ImageEvalBoxplot_perScanType.pdf")
+        hold(False)        
+    
+    def getQuery1(self, site):
+        if site is None:
+            query1 = "SELECT DISTINCT scantype FROM ImageEval;"
+        else:
+            query1 = "SELECT DISTINCT scantype FROM ImageEval WHERE project = '{0}';".format(site)
+        return query1
+    
+    def getQuery2(self, site, scan_type):
+        if site is None:
+            query2 = "SELECT overallqaassessment FROM ImageEval WHERE scantype = '{0}';".format(scan_type)
+        else:
+            query2 = "SELECT overallqaassessment FROM ImageEval WHERE project = '{0}' AND scantype = '{1}';".format(site, scan_type)
+        return query2
 
 if __name__ == "__main__":
+    start_time = datetime.datetime.now()
     Object = ParseXMLFilesAndFillDB()
     Object.main()
+    PlotObject = MakeBoxplots()
+    PlotObject.main()
+    print "-"*50
+    print "The program took "
+    print datetime.datetime.now() - start_time
