@@ -33,7 +33,8 @@ class ParseXMLFilesAndFillDB():
     def main(self):
         expList = self.getExperimentsList()
         self.createDataBase()        
-        self.fillDBFromXMLs(expList)
+        xnatImageReviewID_list = self.getXnatImageReviewIDsFromDB()
+        self.fillDBFromXMLs(expList, xnatImageReviewID_list)
         self.printDBtoCSVfile()
         self.printInfoToCSVfile()
         
@@ -65,7 +66,16 @@ class ParseXMLFilesAndFillDB():
         os.remove(Output)
         expList = ExpString.strip().replace("\"","").split('\n')
         return expList[1:] ## header line not needed in the returned list
-          
+        
+    def getXnatImageReviewIDsFromDB(self):
+        SQLiteCommand = "SELECT xnatImageReviewID FROM ImageEval"
+        xnatImageReviewID_info = self.getInfoFromDB(SQLiteCommand)
+        xnatImageReviewID_list = list()
+        for row in xnatImageReviewID_info:
+            xnatImageReviewID = str(row[0])
+            xnatImageReviewID_list.append(xnatImageReviewID)
+        return xnatImageReviewID_list
+
     def createDataBase(self):
         """
         Create the ImageEval SQLite database that will contain all of
@@ -81,8 +91,8 @@ class ParseXMLFilesAndFillDB():
         dbColTypes += "xnatSubjectID TEXT, xnatImageReviewLabel TEXT, xnatImageReviewID TEXT, "
         dbColTypes += "xnatSessionID TEXT"
     
-        if os.path.exists(self.dbFileName):
-            os.remove(self.dbFileName)
+        #if os.path.exists(self.dbFileName):
+        #    os.remove(self.dbFileName)
         if os.path.exists(self.dbFileName):
             print("Using cached db")
         else:
@@ -91,12 +101,15 @@ class ParseXMLFilesAndFillDB():
             dbCur.execute("CREATE TABLE ImageEval({0});".format(dbColTypes))
             dbCur.close()
             
-    def fillDBFromXMLs(self, expList):
+    def fillDBFromXMLs(self, expList, xnatImageReviewID_list):
         con = lite.connect(self.dbFileName)
         dbCur = con.cursor()
         
         for line in expList:
-            (xnatSubjectID, URI) = self._getScanInfo(line)
+            (xnatImageReviewID, xnatSubjectID, URI) = self._getScanInfo(line)
+            ## if this image eval is already in the database, skip it
+            if xnatImageReviewID in xnatImageReviewID_list:
+                continue
             xmlString = self.getXMLstring(URI)            
             myResult=ParseToFields(xmlString)
             xmlString = None
@@ -168,9 +181,10 @@ class ParseXMLFilesAndFillDB():
     def _getScanInfo(self, line):
         """ Returns the XNAT Subject ID and the URI for an Image Eval. """
         scan_info = line.strip().split(',')
+        xnat_image_review_ID = scan_info[0]
         xnat_subject_ID = scan_info[2]
         URI = scan_info[4]
-        return xnat_subject_ID, URI
+        return xnat_image_review_ID, xnat_subject_ID, URI
                 
     def getXMLstring(self, URI):
         """
@@ -249,7 +263,10 @@ class ParseXMLFilesAndFillDB():
         Handle.writerow(col_name_list)
         tmp_session = None
         line = None
-        imagefile_info = self.getImageFileInfoFromDB()
+        SQLiteCommand = "SELECT project, subject, session, overallqaassessment, scantype, imagefile "
+        SQLiteCommand += "FROM ImageEval WHERE overallqaassessment > 5 "
+        SQLiteCommand += "ORDER BY project, subject, session, scantype, overallqaassessment DESC;"        
+        imagefile_info = self.getInfoFromDB(SQLiteCommand)
         _iterator = range(0,len(imagefile_info))
         for i in _iterator:
             row = imagefile_info[i]
@@ -275,12 +292,9 @@ class ParseXMLFilesAndFillDB():
             if i == _iterator[-1]:
                 Handle.writerow(line)
          
-    def getImageFileInfoFromDB(self):
+    def getInfoFromDB(self, SQLiteCommand):
         con = lite.connect(self.dbFileName)
         dbCur = con.cursor()
-        SQLiteCommand = "SELECT project, subject, session, overallqaassessment, scantype, imagefile "
-        SQLiteCommand += "FROM ImageEval WHERE overallqaassessment > 5 "
-        SQLiteCommand += "ORDER BY project, subject, session, scantype, overallqaassessment DESC;"
         dbCur.execute(SQLiteCommand)
         DBinfo = dbCur.fetchall()
         dbCur.close()
@@ -407,7 +421,7 @@ class MakeBoxplots():
         return List
 
     def getEvalScoresAndXticks(self, site = None):
-        scanTypeList = [u'T1-30', u'T2-30', u'T1-15', u'PDT2-15', u'T2-15', u'PD-15']
+        scanTypeList = [u'T1-30', u'T2-30', u'T1-15', u'T2-15', u'PD-15']
         all_evals = list()
         x_labels = list()        
         query_1 = self.getQuery1(site)
@@ -455,7 +469,7 @@ class MakeBoxplots():
         (all_evals, x_labels, scanTypeList) = self.getEvalScoresAndXticks()
         boxplot(all_evals)
         ylim(-0.1, 10.1)
-        xticks( arange(1, len(scanTypeList)+1), x_labels, fontsize = 'small')
+        xticks( arange(1, len(scanTypeList)+1), x_labels, fontsize = 'medium')
         yticks(fontsize = 'large')
         xlabel("\n \n Image Scan Type (Ratio of Scores Greater Than 5 to Total Scores)", fontsize = 'large')
         ylabel("Evalution Scores \n", fontsize = 'large')
