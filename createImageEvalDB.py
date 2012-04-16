@@ -100,8 +100,8 @@ class ParseXMLFilesAndFillDB():
             xmlString = self.getXMLstring(URI)            
             myResult=ParseToFields(xmlString)
             xmlString = None
-            # find the scan type from the image file name
-            (subject, scanType) = self._findSessionAndScanType(myResult._fieldDict['imagefile'])
+            imagefile = myResult._fieldDict['imagefile']
+            (subject, scanType) = self._findSessionAndScanType(imagefile)
             myResult._fieldDict['subject'] = subject
             myResult._fieldDict['scantype'] = scanType
             myResult._fieldDict['xnatSubjectID']= xnatSubjectID    
@@ -112,15 +112,59 @@ class ParseXMLFilesAndFillDB():
             myResult._fieldDict['xnatImageReviewID'] = myResult._imageReviewID
             myResult._fieldDict['session'] = myResult._session_LABEL
             myResult._fieldDict['seriesnumber'] = myResult._series_number
-    
-            SQLiteCommand = self._getSQLiteCommand(myResult._fieldDict)
-            myResult = None
-            dbCur.execute(SQLiteCommand)
-            SQLiteCommand = None
+            
+            PDT2_scan_types = ['PDT2-15', 'PD-15', 'T2-15']
+            if scanType not in PDT2_scan_types:
+                if self.checkIfImageFileExists(imagefile):
+                    pass
+                else:
+                    myResult._fieldDict['imagefile'] = "File path in XML doesn't exist"
+                SQLiteCommand = self._getSQLiteCommand(myResult._fieldDict)
+                myResult = None
+                dbCur.execute(SQLiteCommand)            
+                SQLiteCommand = None                
+            else:
+                SQLite_command_dict = self.checkScanTypesAndImagefile(scanType, imagefile, 
+                                                                      myResult._fieldDict)
+                myResult = None
+                commands_list = SQLite_command_dict.values()
+                for command in commands_list:
+                    dbCur.execute(command)
+                    command = None
+
             con.commit()
                   
         dbCur.close()
-                    
+        
+    def checkIfImageFileExists(self, imagefile):
+        if os.path.exists(imagefile):
+            return 1
+        else:
+            return 0
+        
+    def checkScanTypesAndImagefile(self, scan_type, imagefile, fieldDict):
+        SQLite_command_dict = dict()
+        if scan_type == 'PDT2-15':
+            PD_imagefile = imagefile.replace('_PDT2-15_', '_PD-15_')
+            T2_imagefile = imagefile.replace('_PDT2-15_', '_T2-15_')
+        elif scan_type == 'PD-15':
+            PD_imagefile = imagefile
+            T2_imagefile = imagefile.replace('_PD-15_', '_T2-15_')            
+        elif scan_type == 'T2-15':
+            PD_imagefile = imagefile.replace('_T2-15_', '_PD-15_')
+            T2_imagefile = imagefile
+        if os.path.exists(PD_imagefile):
+            PD_fieldDict = fieldDict
+            PD_fieldDict['scantype'] = 'PD-15'
+            PD_fieldDict['imagefile'] = PD_imagefile
+            SQLite_command_dict['PD-15'] = self._getSQLiteCommand(PD_fieldDict)
+        if os.path.exists(T2_imagefile):
+            T2_fieldDict = fieldDict
+            T2_fieldDict['scantype'] = 'T2-15'
+            T2_fieldDict['imagefile'] = T2_imagefile
+            SQLite_command_dict['T2-15'] = self._getSQLiteCommand(T2_fieldDict)
+        return SQLite_command_dict
+    
     def _getScanInfo(self, line):
         """ Returns the XNAT Subject ID and the URI for an Image Eval. """
         scan_info = line.strip().split(',')
@@ -199,14 +243,16 @@ class ParseXMLFilesAndFillDB():
         """
         
         """                
-        Handle = csv.writer(open('proj_subj_session_imagefiles.csv', 'wb'),
+        Handle = csv.writer(open('del_proj_subj_session_imagefiles.csv', 'wb'),
                             quoting=csv.QUOTE_ALL)
         col_name_list = ["project", "subject", "session", "imagefiles"]
         Handle.writerow(col_name_list)
         tmp_session = None
         line = None
         imagefile_info = self.getImageFileInfoFromDB()
-        for row in imagefile_info:
+        _iterator = range(0,len(imagefile_info))
+        for i in _iterator:
+            row = imagefile_info[i]
             project = str(row[0])
             subject = str(row[1])
             session = str(row[2])
@@ -225,6 +271,9 @@ class ParseXMLFilesAndFillDB():
             tmp_session = session
             sorted_eval_dict = sort(eval_dict)
             line = (project, subject, session, sorted_eval_dict)
+            ## make sure to print the last row
+            if i == _iterator[-1]:
+                Handle.writerow(line)
          
     def getImageFileInfoFromDB(self):
         con = lite.connect(self.dbFileName)
