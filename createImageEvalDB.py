@@ -33,8 +33,7 @@ class ParseXMLFilesAndFillDB():
     def main(self):
         expList = self.getExperimentsList()
         self.createDataBase()        
-        xnatImageReviewID_list = self.getXnatImageReviewIDsFromDB()
-        self.fillDBFromXMLs(expList, xnatImageReviewID_list)
+        self.fillDBFromXMLs(expList)
         self.printDBtoCSVfile()
         self.printInfoToCSVfile()
         
@@ -67,15 +66,6 @@ class ParseXMLFilesAndFillDB():
         expList = ExpString.strip().replace("\"","").split('\n')
         return expList[1:] ## header line not needed in the returned list
         
-    def getXnatImageReviewIDsFromDB(self):
-        SQLiteCommand = "SELECT xnatImageReviewID FROM ImageEval"
-        xnatImageReviewID_info = self.getInfoFromDB(SQLiteCommand)
-        xnatImageReviewID_list = list()
-        for row in xnatImageReviewID_info:
-            xnatImageReviewID = str(row[0])
-            xnatImageReviewID_list.append(xnatImageReviewID)
-        return xnatImageReviewID_list
-
     def createDataBase(self):
         """
         Create the ImageEval SQLite database that will contain all of
@@ -101,15 +91,12 @@ class ParseXMLFilesAndFillDB():
             dbCur.execute("CREATE TABLE ImageEval({0});".format(dbColTypes))
             dbCur.close()
             
-    def fillDBFromXMLs(self, expList, xnatImageReviewID_list):
+    def fillDBFromXMLs(self, expList):
         con = lite.connect(self.dbFileName)
         dbCur = con.cursor()
         
         for line in expList:
-            (xnatImageReviewID, xnatSubjectID, project, URI) = self._getScanInfo(line)
-            ## if this image eval is already in the database, skip it
-            if xnatImageReviewID in xnatImageReviewID_list:
-                continue
+            (xnatSubjectID, project, URI) = self._getScanInfo(line)
             xmlString = self.getXMLstring(URI)            
             myResult=ParseToFields(xmlString)
             xmlString = None
@@ -180,11 +167,10 @@ class ParseXMLFilesAndFillDB():
     def _getScanInfo(self, line):
         """ Returns the XNAT Subject ID and the URI for an Image Eval. """
         scan_info = line.strip().split(',')
-        xnat_image_review_ID = scan_info[0]
         xnat_subject_ID = scan_info[2]
         project = scan_info[3]
         URI = scan_info[4]
-        return xnat_image_review_ID, xnat_subject_ID, project, URI
+        return xnat_subject_ID, project, URI
                 
     def getXMLstring(self, URI):
         """
@@ -261,7 +247,7 @@ class ParseXMLFilesAndFillDB():
         """
         
         """                
-        Handle = csv.writer(open('del_proj_subj_session_imagefiles.csv', 'wb'),
+        Handle = csv.writer(open('proj_subj_session_imagefiles.csv', 'wb'),
                             quoting=csv.QUOTE_ALL)
         col_name_list = ["project", "subject", "session", "imagefiles"]
         Handle.writerow(col_name_list)
@@ -447,8 +433,8 @@ class MakeBoxplots():
         This function makes a box-and-whisker plot showing the evaluation
         scores grouped by the image scan type.  
         """
-        pp = pdfpages('test.pdf')
-        #pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
+        #pp = pdfpages('test.pdf')
+        pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
         site_list = self.getListFromDB("SELECT DISTINCT project FROM ImageEval;")
         for site in site_list:
             (all_evals, x_labels, scanTypeList) = self.getEvalScoresAndXticks(site)
