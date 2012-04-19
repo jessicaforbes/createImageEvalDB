@@ -91,8 +91,8 @@ class ParseXMLFilesAndFillDB():
         dbColTypes += "xnatSubjectID TEXT, xnatImageReviewLabel TEXT, xnatImageReviewID TEXT, "
         dbColTypes += "xnatSessionID TEXT"
     
-        #if os.path.exists(self.dbFileName):
-        #    os.remove(self.dbFileName)
+        if os.path.exists(self.dbFileName):
+            os.remove(self.dbFileName)
         if os.path.exists(self.dbFileName):
             print("Using cached db")
         else:
@@ -106,7 +106,7 @@ class ParseXMLFilesAndFillDB():
         dbCur = con.cursor()
         
         for line in expList:
-            (xnatImageReviewID, xnatSubjectID, URI) = self._getScanInfo(line)
+            (xnatImageReviewID, xnatSubjectID, project, URI) = self._getScanInfo(line)
             ## if this image eval is already in the database, skip it
             if xnatImageReviewID in xnatImageReviewID_list:
                 continue
@@ -114,30 +114,30 @@ class ParseXMLFilesAndFillDB():
             myResult=ParseToFields(xmlString)
             xmlString = None
             imagefile = myResult._fieldDict['imagefile']
-            (subject, scanType) = self._findSessionAndScanType(imagefile)
+            (subject, session, scan_type) = self._findSubjectSessionAndScanType(imagefile, project)
             myResult._fieldDict['subject'] = subject
-            myResult._fieldDict['scantype'] = scanType
-            myResult._fieldDict['xnatSubjectID']= xnatSubjectID    
+            myResult._fieldDict['session'] = session            
+            myResult._fieldDict['scantype'] = scan_type
+            myResult._fieldDict['xnatSubjectID']= xnatSubjectID
             myResult._fieldDict['date'] = myResult._date
             myResult._fieldDict['time'] = myResult._time
             myResult._fieldDict['project'] = myResult._project
             myResult._fieldDict['xnatImageReviewLabel'] = myResult._label
             myResult._fieldDict['xnatImageReviewID'] = myResult._imageReviewID
-            myResult._fieldDict['session'] = myResult._session_LABEL
             myResult._fieldDict['seriesnumber'] = myResult._series_number
             
             PDT2_scan_types = ['PDT2-15', 'PD-15', 'T2-15']
-            if scanType not in PDT2_scan_types:
+            if scan_type not in PDT2_scan_types:
                 if self.checkIfImageFileExists(imagefile):
                     pass
                 else:
                     myResult._fieldDict['imagefile'] = "File path in XML doesn't exist"
                 SQLiteCommand = self._getSQLiteCommand(myResult._fieldDict)
                 myResult = None
-                dbCur.execute(SQLiteCommand)            
-                SQLiteCommand = None                
+                dbCur.execute(SQLiteCommand)
+                SQLiteCommand = None        
             else:
-                SQLite_command_dict = self.checkScanTypesAndImagefile(scanType, imagefile, 
+                SQLite_command_dict = self.checkScanTypesAndImagefile(scan_type, imagefile, 
                                                                       myResult._fieldDict)
                 myResult = None
                 commands_list = SQLite_command_dict.values()
@@ -146,7 +146,6 @@ class ParseXMLFilesAndFillDB():
                     command = None
 
             con.commit()
-                  
         dbCur.close()
         
     def checkIfImageFileExists(self, imagefile):
@@ -183,8 +182,9 @@ class ParseXMLFilesAndFillDB():
         scan_info = line.strip().split(',')
         xnat_image_review_ID = scan_info[0]
         xnat_subject_ID = scan_info[2]
+        project = scan_info[3]
         URI = scan_info[4]
-        return xnat_image_review_ID, xnat_subject_ID, URI
+        return xnat_image_review_ID, xnat_subject_ID, project, URI
                 
     def getXMLstring(self, URI):
         """
@@ -198,22 +198,26 @@ class ParseXMLFilesAndFillDB():
         #print "Parsing Image Eval XML file from {0}".format(path)
         return xml_string
                 
-    def _findSessionAndScanType(self, imageDir):
+    def _findSubjectSessionAndScanType(self, imageDir, project):
         """
         Find the subject and scan type from the image file name
         listed in the Image Eval XML string.
         """
         _image_dir_split = imageDir.strip().split('/') 
         _image_file = _image_dir_split[-1]
-        _image_file_pattern = re.compile('([^_]*)_[^_]*_([^_]*)_[^-]*')
+        if project != "PHD_DTI_THP":
+            _image_file_pattern = re.compile('([^_]*)_([^_]*)_([^_]*)_[^-]*')
+        else:
+            _image_file_pattern = re.compile('([^_]*)_([^_]*_[^_]*)_([^_]*)_[^-]*')            
         _image_file_group = _image_file_pattern.match(_image_file)             
-        if _image_file_group is not None and len(_image_file_group.groups()) == 2:
+        if _image_file_group is not None and len(_image_file_group.groups()) == 3:
             _subject = _image_file_group.group(1)
-            _scanType = _image_file_group.group(2)
-            return _subject, _scanType
+            _session = _image_file_group.group(2)
+            _scanType = _image_file_group.group(3)
+            return _subject, _session, _scanType
         else:
             print("ERROR: Invalid number of groups. {0}".format(_image_file))
-            return "NOT_FOUND", "NOT_FOUND"
+            return "NOT_FOUND", "NOT_FOUND", "NOT_FOUND"
              
     def _getSQLiteCommand(self, EvalDict):
         """
@@ -346,7 +350,6 @@ class ParseToFields():
         self._project=myelem.attrib['project']
         self._label  =myelem.attrib['label']
         self._imageReviewID = myelem.attrib['ID']
-        self._session_LABEL=self._label[0:5] ## the first 5 digits are always the session label
         for child in myelem.getiterator():
             if child.tag == '{http://nrg.wustl.edu/phd}field':
                 myatts=dict(child.items())
@@ -381,8 +384,8 @@ class MakeBoxplots():
         self.dbFileName = 'ImageEvals.db'
         
     def main(self):
-        self.makeAllSiteBoxPlotNEW()
-        self.makePerSiteBoxPlotNEW()
+        self.makeAllSiteBoxPlot()
+        self.makePerSiteBoxPlot()
 
     def getEvalScores(self, SQLite_query):
         """
@@ -439,13 +442,13 @@ class MakeBoxplots():
                 x_labels.append(scan_type + "\n (0)")
         return all_evals, x_labels, scanTypeList
     
-    def makePerSiteBoxPlotNEW(self):
+    def makePerSiteBoxPlot(self):
         """
         This function makes a box-and-whisker plot showing the evaluation
         scores grouped by the image scan type.  
         """
-        #pp = pdfpages('test.pdf')
-        pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
+        pp = pdfpages('test.pdf')
+        #pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
         site_list = self.getListFromDB("SELECT DISTINCT project FROM ImageEval;")
         for site in site_list:
             (all_evals, x_labels, scanTypeList) = self.getEvalScoresAndXticks(site)
@@ -461,7 +464,7 @@ class MakeBoxplots():
             hold(False)
         pp.close()
         
-    def makeAllSiteBoxPlotNEW(self):
+    def makeAllSiteBoxPlot(self):
         """
         This function makes a box-and-whisker plot showing the evaluation
         scores grouped by the image scan type.          
