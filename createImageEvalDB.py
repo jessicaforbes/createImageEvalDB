@@ -72,7 +72,7 @@ class ParseXMLFilesAndFillDB():
         the information parsed from the Image Eval XML files.            
         """   
         ## column titles and types for the ImageEval SQLite database
-        dbColTypes =  "project TEXT, subject INTEGER, session INTEGER, seriesnumber INTEGER, scantype TEXT, "
+        dbColTypes =  "project TEXT, subject TEXT, session TEST, seriesnumber INTEGER, scantype TEXT, "
         dbColTypes += "overallqaassessment INTEGER, normalvariants TEXT, lesions TEXT, snr TEXT, cnr "
         dbColTypes += "TEXT, fullbraincoverage TEXT, misalignment TEXT, swapwraparound TEXT, "
         dbColTypes += "ghostingmotion TEXT, inhomogeneity TEXT, susceptibilitymetal TEXT, "
@@ -83,13 +83,10 @@ class ParseXMLFilesAndFillDB():
     
         if os.path.exists(self.dbFileName):
             os.remove(self.dbFileName)
-        if os.path.exists(self.dbFileName):
-            print("Using cached db")
-        else:
-            con = lite.connect(self.dbFileName)
-            dbCur = con.cursor()
-            dbCur.execute("CREATE TABLE ImageEval({0});".format(dbColTypes))
-            dbCur.close()
+        con = lite.connect(self.dbFileName)
+        dbCur = con.cursor()
+        dbCur.execute("CREATE TABLE ImageEval({0});".format(dbColTypes))
+        dbCur.close()
             
     def fillDBFromXMLs(self, expList):
         con = lite.connect(self.dbFileName)
@@ -153,15 +150,13 @@ class ParseXMLFilesAndFillDB():
             PD_imagefile = imagefile.replace('_T2-15_', '_PD-15_')
             T2_imagefile = imagefile
         if os.path.exists(PD_imagefile):
-            PD_fieldDict = fieldDict
-            PD_fieldDict['scantype'] = 'PD-15'
-            PD_fieldDict['imagefile'] = PD_imagefile
-            SQLite_command_dict['PD-15'] = self._getSQLiteCommand(PD_fieldDict)
+            fieldDict['scantype'] = 'PD-15'
+            fieldDict['imagefile'] = PD_imagefile
+            SQLite_command_dict['PD-15'] = self._getSQLiteCommand(fieldDict)
         if os.path.exists(T2_imagefile):
-            T2_fieldDict = fieldDict
-            T2_fieldDict['scantype'] = 'T2-15'
-            T2_fieldDict['imagefile'] = T2_imagefile
-            SQLite_command_dict['T2-15'] = self._getSQLiteCommand(T2_fieldDict)
+            fieldDict['scantype'] = 'T2-15'
+            fieldDict['imagefile'] = T2_imagefile
+            SQLite_command_dict['T2-15'] = self._getSQLiteCommand(fieldDict)
         return SQLite_command_dict
     
     def _getScanInfo(self, line):
@@ -181,7 +176,7 @@ class ParseXMLFilesAndFillDB():
         Handle = urllib.urlopen(path)
         xml_string = Handle.read()
         Handle.close()
-        #print "Parsing Image Eval XML file from {0}".format(path)
+        print "Parsing Image Eval XML file from {0}".format(path)
         return xml_string
                 
     def _findSubjectSessionAndScanType(self, imageDir, project):
@@ -433,7 +428,6 @@ class MakeBoxplots():
         This function makes a box-and-whisker plot showing the evaluation
         scores grouped by the image scan type.  
         """
-        #pp = pdfpages('test.pdf')
         pp = pdfpages('ImageEvalBoxplots_perScanType_perSite.pdf')
         site_list = self.getListFromDB("SELECT DISTINCT project FROM ImageEval;")
         for site in site_list:
@@ -464,7 +458,6 @@ class MakeBoxplots():
         ylabel("Evalution Scores \n", fontsize = 'large')
         title('Evaluation Scores Grouped by Image Scan Type \n \n', fontsize = 'x-large')
         subplots_adjust(bottom = 0.2, top = 0.86, right = .88, left = 0.15)
-        #savefig("test_perscantype.pdf")
         savefig("ImageEvalBoxplot_perScanType.pdf")
         hold(False)        
     
@@ -483,9 +476,22 @@ class MakeBoxplots():
         return query2
 
 if __name__ == "__main__":
+   # Create and parse input arguments
+    parser = argparse.ArgumentParser(description='')
+    parser.add_argument('-r', '--useCurrentDatabase', action='store_true', default=False,
+                    dest='useCurrentDatabase', help='Use the current database to make boxplots')
+    inputArguments = parser.parse_args()    
+    
     start_time = datetime.datetime.now()
-    Object = ParseXMLFilesAndFillDB()
-    Object.main()
+    if inputArguments.useCurrentDatabase is False:
+        Object = ParseXMLFilesAndFillDB()
+        Object.main()
+    else:
+        if os.path.exists("ImageEvals.db"):
+            pass
+        else:
+            print("ERROR: No ImageEvals.db in current directory")
+            sys.exit(-1)
     PlotObject = MakeBoxplots()
     PlotObject.main()
     print "-"*50
