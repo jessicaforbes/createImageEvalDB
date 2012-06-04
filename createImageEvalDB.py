@@ -78,9 +78,8 @@ class ParseXMLFilesAndFillDB():
         dbColTypes += "ghostingmotion TEXT, inhomogeneity TEXT, susceptibilitymetal TEXT, "
         dbColTypes += "flowartifact TEXT, truncationartifact TEXT, evaluator TEXT, imagefile "
         dbColTypes += "TEXT, freeformnotes TEXT, evaluationcompleted TEXT, date TEXT, time TEXT, "
-        dbColTypes += "xnatSubjectID TEXT, xnatImageReviewLabel TEXT, xnatImageReviewID TEXT, "
-        dbColTypes += "xnatSessionID TEXT"
-    
+        dbColTypes += "xnatSubjectID TEXT, xnatImageReviewLabel TEXT, xnatImageReviewID TEXT"
+
         if os.path.exists(self.dbFileName):
             os.remove(self.dbFileName)
         con = lite.connect(self.dbFileName)
@@ -109,13 +108,15 @@ class ParseXMLFilesAndFillDB():
             myResult._fieldDict['xnatImageReviewLabel'] = myResult._label
             myResult._fieldDict['xnatImageReviewID'] = myResult._imageReviewID
             myResult._fieldDict['seriesnumber'] = myResult._series_number
-            
+            #  forcing image file name to follow mandated format
+            imagefile = os.path.join("/paulsen", "MRx", myResult._project, subject, session, "ANONRAW",
+                                      subject + "_" + session + "_" + scan_type + "_" + myResult._series_number + ".nii.gz")
             PDT2_scan_types = ['PDT2-15', 'PD-15', 'T2-15']
             if scan_type not in PDT2_scan_types:
                 if self.checkIfImageFileExists(imagefile):
-                    pass
+                    myResult._fieldDict['imagefile'] = imagefile
                 else:
-                    myResult._fieldDict['imagefile'] = "File path in XML doesn't exist"
+                    myResult._fieldDict['imagefile'] = "File path is not in the file system: {0}".format(imagefile)
                 SQLiteCommand = self._getSQLiteCommand(myResult._fieldDict)
                 myResult = None
                 dbCur.execute(SQLiteCommand)
@@ -131,6 +132,8 @@ class ParseXMLFilesAndFillDB():
 
             con.commit()
         dbCur.close()
+        
+    
         
     def checkIfImageFileExists(self, imagefile):
         if os.path.exists(imagefile):
@@ -298,32 +301,31 @@ class ParseToFields():
         self._series_number = ""
         self._date          = ""
         self._time          = ""
-        self._fieldDict     = dict({'susceptibilitymetal': 'NA',
-                              'scantype': 'NA',
-                              'flowartifact': 'NA',
+        self._fieldDict     = dict({'susceptibilitymetal': 'NULL',
+                              'scantype': 'NULL',
+                              'flowartifact': 'NULL',
                               'freeformnotes': ' ',
-                              'subject': 'NA',
-                              'session': 'NA',
-                              'seriesnumber': 'NA',
-                              'cnr': 'NA',
-                              'overallqaassessment': 'NA',
-                              'truncationartifact': 'NA',
-                              'ghostingmotion': 'NA',
-                              'imagefile': 'NA',
-                              'lesions': 'NA',
-                              'misalignment': 'NA',
-                              'snr': 'NA',
-                              'date': 'NA',
-                              'evaluator': 'NA',
-                              'xnatImageReviewLabel': 'NA',
-                              'xnatSessionID': 'NA',
-                              'fullbraincoverage': 'NA',
-                              'normalvariants': 'NA',
-                              'evaluationcompleted': 'NA',
-                              'project': 'NA',
-                              'swapwraparound': 'NA',
-                              'inhomogeneity': 'NA',
-                              'time': 'NA'})
+                              'subject': 'NULL',
+                              'session': 'NULL',
+                              'seriesnumber': 'NULL',
+                              'cnr': 'NULL',
+                              'overallqaassessment': 'NULL',
+                              'truncationartifact': 'NULL',
+                              'ghostingmotion': 'NULL',
+                              'imagefile': 'NULL',
+                              'lesions': 'NULL',
+                              'misalignment': 'NULL',
+                              'snr': 'NULL',
+                              'date': 'NULL',
+                              'evaluator': 'NULL',
+                              'xnatImageReviewLabel': 'NULL',
+                              'fullbraincoverage': 'NULL',
+                              'normalvariants': 'NULL',
+                              'evaluationcompleted': 'NULL',
+                              'project': 'NULL',
+                              'swapwraparound': 'NULL',
+                              'inhomogeneity': 'NULL',
+                              'time': 'NULL'})
         self._sql_col_names  = list()
         self._string=xmlString
         myelem=et.fromstring(self._string)
