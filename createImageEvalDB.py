@@ -35,7 +35,8 @@ class ParseXMLFilesAndFillDB():
         self.createDataBase()        
         self.fillDBFromXMLs(expList)
         self.printDBtoCSVfile()
-        self.printInfoToCSVfile()
+        self.printAutoWorkupCSV()
+        self.printImagesNotInFileSystem()
         
     def getExperimentsList(self):
         """
@@ -241,7 +242,7 @@ class ParseXMLFilesAndFillDB():
         for row in DBinfo:
             Handle.writerow(row)                
          
-    def printInfoToCSVfile(self):
+    def printAutoWorkupCSV(self):
         """
         
         """                
@@ -252,8 +253,8 @@ class ParseXMLFilesAndFillDB():
         tmp_session = None
         line = None
         SQLiteCommand = "SELECT project, subject, session, overallqaassessment, scantype, imagefile "
-        SQLiteCommand += "FROM ImageEval WHERE overallqaassessment > 5 "
-        SQLiteCommand += "ORDER BY project, subject, session, scantype, overallqaassessment DESC;"        
+        SQLiteCommand += "FROM ImageEval WHERE overallqaassessment > 5 AND substr(imagefile,0,5) != 'File'"
+        SQLiteCommand += "ORDER BY project, subject, session, scantype, overallqaassessment DESC;"      
         imagefile_info = self.getInfoFromDB(SQLiteCommand)
         _iterator = range(0,len(imagefile_info))
         for i in _iterator:
@@ -280,6 +281,17 @@ class ParseXMLFilesAndFillDB():
             if i == _iterator[-1]:
                 Handle.writerow(line)
          
+    def printImagesNotInFileSystem(self): 
+        Handle = csv.writer(open('images_not_in_file_system.csv', 'wb'),
+                            quoting=csv.QUOTE_ALL)
+        Handle.writerow(["image files not in the file system"])
+        SQLiteCommand = "SELECT substr(imagefile,38) FROM ImageEval "
+        SQLiteCommand += "WHERE overallqaassessment > 5 AND substr(imagefile,0,5) = 'File'"
+        SQLiteCommand += "ORDER BY project, subject, session, scantype, overallqaassessment DESC;"
+        imagefile_info = self.getInfoFromDB(SQLiteCommand)
+        for line in imagefile_info:
+            Handle.writerow(line)
+        
     def getInfoFromDB(self, SQLiteCommand):
         con = lite.connect(self.dbFileName)
         dbCur = con.cursor()
@@ -490,7 +502,10 @@ if __name__ == "__main__":
         Object.main()
     else:
         if os.path.exists("ImageEvals.db"):
-            pass
+            Object = ParseXMLFilesAndFillDB()
+            Object.printDBtoCSVfile()
+            Object.printAutoWorkupCSV()
+            Object.printImagesNotInFileSystem()
         else:
             print("ERROR: No ImageEvals.db in current directory")
             sys.exit(-1)
