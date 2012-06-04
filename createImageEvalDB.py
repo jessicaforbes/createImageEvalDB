@@ -55,17 +55,16 @@ class ParseXMLFilesAndFillDB():
         "PREDICTHD_E11521","10158_2_IR","PREDICTHD_S00202","PHD_041","/data/experiments/PREDICTHD_E11521"
     
         """
-        RESTurl = "https://www.predict-hd.net/xnat/REST/experiments?xsiType="
+        RESTurl = "www.predict-hd.net/xnat/REST/experiments?xsiType="
         RESTurl += "phd:imageReviewData&format=csv&columns=project,phd:image"
         RESTurl += "ReviewData/label,xnat:subjectData/ID"
-        Output = "experiments_tmp.csv"
-        urllib.urlretrieve(RESTurl, Output)
-        Handle = open(Output)
-        ExpString = Handle.read()
-        Handle.close()
-        os.remove(Output)
-        expList = ExpString.strip().replace("\"","").split('\n')
-        return expList[1:] ## header line not needed in the returned list
+        opener = urllib.FancyURLopener({})
+        self.username, self.pword = opener.prompt_user_passwd("www.predict-hd.net/xnat", "XNAT")
+        url = "https://{0}:{1}@{2}".format(self.username, self.pword, RESTurl)
+        info = urllib.urlopen(url)
+        exp_string = info.read()
+        exp_list = exp_string.strip().replace("\"","").split('\n')
+        return exp_list[1:] ## header line not needed in the returned list
         
     def createDataBase(self):
         """
@@ -134,8 +133,6 @@ class ParseXMLFilesAndFillDB():
             con.commit()
         dbCur.close()
         
-    
-        
     def checkIfImageFileExists(self, imagefile):
         if os.path.exists(imagefile):
             return 1
@@ -176,10 +173,10 @@ class ParseXMLFilesAndFillDB():
         Copy the Image Eval XML information from XNAT.
         Store it in the string "xmlString"
         """
-        path = "https://www.predict-hd.net/xnat{0}?format=xml".format(URI)
-        Handle = urllib.urlopen(path)
-        xml_string = Handle.read()
-        Handle.close()
+        path = "www.predict-hd.net/xnat{0}?format=xml".format(URI)
+        url = "https://{0}:{1}@{2}".format(self.username, self.pword, path)
+        info = urllib.urlopen(url)
+        xml_string = info.read()
         print "Parsing Image Eval XML file from {0}".format(path)
         return xml_string
                 
